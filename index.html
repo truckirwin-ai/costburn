@@ -995,22 +995,36 @@ function renderHeatmap(sessions, since, until){
 function renderQuadrant(sessions){
   if(charts.quadrant) charts.quadrant.destroy();
   const cs = getComputedStyle(document.documentElement);
+  const agg = (typeof CUR_AGG === 'number') ? CUR_AGG : 0;
+  const savFactor = 1 - agg; // post-governor $/turn multiplier
   const pts = sessions.filter(s=>s.Turns>0).map(s=>{
     const cpt = s['Cost (USD)']/s.Turns;
     const risk = (s.Turns>1000 || cpt>0.80) ? 'red' : (s.Turns>500 || cpt>0.40) ? 'yellow' : 'green';
     return { x: s.Turns, y: cpt, r: Math.min(30, 3 + Math.sqrt(s['Cost (USD)'])*1.5), risk, label: shortSess(s['Session ID']) };
   });
+  // Post-governor ghost bubbles: same sessions, lower $/turn.
+  const postPts = pts.map(p => ({ x: p.x, y: p.y * savFactor, r: p.r * savFactor, label: p.label + ' (after)' }));
   const groups = { green:[], yellow:[], red:[] };
   pts.forEach(p=>groups[p.risk].push(p));
   const color = r => cs.getPropertyValue(r==='red'?'--red':r==='yellow'?'--yellow':'--green').trim();
   const datasets = Object.entries(groups).filter(([,v])=>v.length).map(([k,v])=>({
-    label: k, data: v, backgroundColor: color(k)+'99', borderColor: color(k), borderWidth:1,
+    label: k+' (now)', data: v, backgroundColor: color(k)+'99', borderColor: color(k), borderWidth:1,
   }));
+  if (agg > 0.01) {
+    datasets.push({
+      label: `after governor (-${(agg*100).toFixed(0)}%)`,
+      data: postPts,
+      backgroundColor: '#22c55e55',
+      borderColor: '#16a34a',
+      borderWidth: 2,
+      borderDash: [4,3],
+    });
+  }
   charts.quadrant = new Chart($('quadrant'), {
     type:'bubble',
     data:{ datasets },
     options:{
-      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`${c.raw.label} · turns ${c.raw.x} · $/turn ${c.raw.y.toFixed(2)}`}}},
+      plugins:{legend:{display:agg>0.01, position:'top', labels:{color:cs.getPropertyValue('--mute').trim(), boxWidth:10, font:{size:10}}}, tooltip:{callbacks:{label:c=>`${c.raw.label} · turns ${c.raw.x} · $/turn ${c.raw.y.toFixed(2)}`}}},
       scales:{
         x:{type:'logarithmic', title:{display:true,text:'turns (log)', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim()}},
         y:{title:{display:true,text:'$/turn', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim(), callback:v=>'$'+v.toFixed(2)}},
@@ -1022,23 +1036,40 @@ function renderQuadrant(sessions){
 function renderPareto(sessions){
   if(charts.pareto) charts.pareto.destroy();
   const cs = getComputedStyle(document.documentElement);
+  const agg = (typeof CUR_AGG === 'number') ? CUR_AGG : 0;
   const sorted = sessions.slice().sort((a,b)=>b['Cost (USD)']-a['Cost (USD)']);
   const total = sorted.reduce((a,s)=>a+s['Cost (USD)'],0) || 1;
-  let acc=0;
-  const data = sorted.map((s,i)=>{ acc += s['Cost (USD)']; return { x:i+1, y:acc/total*100, cost:s['Cost (USD)'] }; });
-  let n80=0; for(let i=0;i<data.length;i++){ if(data[i].y>=80){ n80=i+1; break; } }
-  if(!n80 && data.length) n80 = data.length;
-  $('paretoNote').innerHTML = `<span class="yellow">${n80}</span> of ${sessions.length} sessions = <span class="yellow">80%</span> of spend · concentration <span class="yellow">${sessions.length?(n80/sessions.length*100).toFixed(0):0}%</span>`;
+  // Cumulative $ curves: now vs after-governor. Post-governor spend = total * (1-agg).
+  let accNow = 0, accAft = 0;
+  const now = [], aft = [];
+  sorted.forEach((s,i) => {
+    accNow += s['Cost (USD)'];
+    accAft += s['Cost (USD)'] * (1 - agg);
+    now.push({ x: i+1, y: accNow });
+    aft.push({ x: i+1, y: accAft });
+  });
+  const yellow = cs.getPropertyValue('--yellow').trim();
+  const savedUSD = total * agg;
+  $('paretoNote').innerHTML = agg > 0.01
+    ? `total <span class="yellow">${fmtUSD(total)}</span> · with governor <span class="green">${fmtUSD(total-savedUSD)}</span> · <span class="red">save ${fmtUSD(savedUSD)}</span> (${(agg*100).toFixed(0)}%)`
+    : `total <span class="yellow">${fmtUSD(total)}</span> across ${sessions.length} sessions · adjust levers above to see post-governor curve`;
+  const datasets = [
+    { label:'now', data: now, borderColor: yellow, backgroundColor: yellow+'33', fill:true, tension:.2, pointRadius:0, borderWidth:2 },
+  ];
+  if (agg > 0.01) {
+    datasets.push({
+      label: `after governor (-${(agg*100).toFixed(0)}%)`,
+      data: aft, borderColor: '#16a34a', backgroundColor:'#22c55e22', fill:true, tension:.2, pointRadius:0, borderWidth:2, borderDash:[5,4],
+    });
+  }
   charts.pareto = new Chart($('pareto'), {
     type:'line',
-    data:{ datasets:[
-      { data: data.map(d=>({x:d.x,y:d.y})), borderColor: cs.getPropertyValue('--yellow').trim(), backgroundColor:cs.getPropertyValue('--yellow').trim()+'33', fill:true, tension:.2, pointRadius:0, borderWidth:2 },
-    ]},
+    data:{ datasets },
     options:{
-      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`session #${c.parsed.x} · ${c.parsed.y.toFixed(1)}% cumulative`}}},
+      plugins:{legend:{display:agg>0.01, position:'top', labels:{color:cs.getPropertyValue('--mute').trim(), boxWidth:10, font:{size:10}}}, tooltip:{callbacks:{label:c=>`${c.dataset.label} · session #${c.parsed.x} · ${fmtUSD(c.parsed.y)}`}}},
       scales:{
         x:{type:'linear', title:{display:true,text:'session rank', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim()}},
-        y:{min:0,max:100, title:{display:true,text:'% cumulative', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim(), callback:v=>v+'%'}},
+        y:{title:{display:true,text:'cumulative $', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim(), callback:v=>'$'+v.toFixed(0)}},
       },
     },
   });
