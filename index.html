@@ -1,0 +1,1193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>CostBurn · TUI</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  /* =========================================================================
+     CodeBurn TUI — data-dense terminal cockpit
+     Palette: Ayu-dark + Matrix punch. Heat-bar: cyan→green→yellow→orange→red.
+     ========================================================================= */
+  :root{
+    --bg:         #070a10;
+    --bg2:        #0d1219;
+    --panel:      #0a0e14;
+    --ink:        #c6c7b8;
+    --mute:       #586670;
+    --dim:        #2a2f3a;
+    --rule:       #1a1f2a;
+    --cyan:       #39BAE6;
+    --green:      #7FD962;
+    --matrix:     #00FF66;
+    --yellow:     #E6B450;
+    --orange:     #FF8F40;
+    --red:        #F07178;
+    --magenta:    #D2A6FF;
+    --blue:       #5E94D1;
+    --heat: linear-gradient(90deg, #5E94D1 0%, #39BAE6 18%, #7FD962 40%, #E6B450 62%, #FF8F40 82%, #F07178 100%);
+    --scan-green: #7FD962;
+  }
+  html[data-theme="anthropic"]{
+    --bg:#F5F1EB; --bg2:#FFFFFF; --panel:#FBF8F3;
+    --ink:#0A0907; --mute:#3B3625; --dim:#A89668; --rule:#B8A878;
+    --cyan:#0F5E7A; --green:#2F7A1E; --matrix:#2F7A1E;
+    --yellow:#B8620C; --orange:#C94520; --red:#A01A10; --magenta:#7B2D8F; --blue:#1A4B9E;
+    --heat: linear-gradient(90deg, #1A4B9E 0%, #0F5E7A 18%, #2F7A1E 40%, #B8620C 62%, #C94520 82%, #A01A10 100%);
+    --scan-green:#2F7A1E;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font:13px/1.35 'JetBrains Mono', 'Fira Code', Menlo, ui-monospace, monospace;
+    font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;
+  }
+  body{padding:12px 16px 80px}
+
+  /* ---------------- panels ---------------- */
+  .panel{
+    position:relative;
+    border:1px solid var(--rule);
+    border-radius:4px;
+    padding:18px 14px 12px;
+    background:var(--panel);
+    margin-bottom:10px;
+  }
+  .panel.cyan{border-color:#1E5A73}
+  .panel.green{border-color:#3E6E2E}
+  .panel.yellow{border-color:#6E5322}
+  .panel.orange{border-color:#7A4520}
+  .panel.red{border-color:#6E2A2E}
+  .panel.magenta{border-color:#5C4377}
+  .panel.blue{border-color:#2D4A6B}
+
+  .panel > .title{
+    position:absolute; top:-9px; left:12px;
+    background:var(--bg); padding:0 6px;
+    font-weight:700; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+  }
+  .panel.cyan > .title{color:var(--cyan)}
+  .panel.green > .title{color:var(--green)}
+  .panel.yellow > .title{color:var(--yellow)}
+  .panel.orange > .title{color:var(--orange)}
+  .panel.red > .title{color:var(--red)}
+  .panel.magenta > .title{color:var(--magenta)}
+  .panel.blue > .title{color:var(--blue)}
+
+  .panel > .meta{
+    position:absolute; top:-8px; right:12px;
+    background:var(--bg); padding:0 6px;
+    font-size:10px; color:var(--mute);
+  }
+
+  /* ---------------- grids ---------------- */
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  .g-23{display:grid;grid-template-columns:2fr 3fr;gap:10px}
+  .g-32{display:grid;grid-template-columns:3fr 2fr;gap:10px}
+  @media (max-width:1200px){.g2,.g3,.g-23,.g-32{grid-template-columns:1fr}}
+
+  /* ---------------- top bar ---------------- */
+  .topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 10px 10px;border-bottom:1px solid var(--rule);margin-bottom:10px}
+  .logo{font-weight:700;color:var(--yellow);font-size:15px;letter-spacing:.05em}
+  .logo .accent{color:var(--orange)}
+  .pill{padding:2px 8px;background:var(--bg2);border:1px solid var(--rule);color:var(--ink);font-size:11px;border-radius:3px}
+
+  .tabs{display:flex;gap:0}
+  .tab{padding:4px 11px;color:var(--mute);cursor:pointer;user-select:none;font-size:12px;border-right:1px solid var(--rule)}
+  .tab:first-child{border-left:1px solid var(--rule)}
+  .tab.active{background:var(--yellow);color:#0a0e14;font-weight:700}
+  html[data-theme="anthropic"] .tab.active{background:var(--orange);color:#fff}
+  /* Anthropic: lighter data cells + white inputs, keep panel bg */
+  html[data-theme="anthropic"] .kpi{background:#FFFFFF;border-color:#E4DCCB}
+  html[data-theme="anthropic"] select,
+  html[data-theme="anthropic"] input,
+  html[data-theme="anthropic"] textarea,
+  html[data-theme="anthropic"] .monthSel,
+  html[data-theme="anthropic"] .btn,
+  html[data-theme="anthropic"] .seg .opt:not(.active){background:#FFFFFF}
+  .tab:hover:not(.active){color:var(--ink);background:var(--bg2)}
+
+  .monthSel{background:var(--bg2);color:var(--ink);border:1px solid var(--rule);padding:4px 8px;font:inherit;font-size:12px;border-radius:3px;outline:none;cursor:pointer}
+  .monthSel.active{background:var(--yellow);color:#0a0e14;font-weight:700}
+
+  .seg{display:flex;border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+  .seg .opt{padding:4px 10px;color:var(--mute);cursor:pointer;font-size:11px;background:var(--bg2)}
+  .seg .opt.active{background:var(--cyan);color:#0a0e14;font-weight:700}
+  html[data-theme="anthropic"] .seg .opt.active{background:var(--orange);color:#fff}
+
+  .btn{background:var(--bg2);color:var(--ink);border:1px solid var(--rule);padding:4px 10px;font:inherit;font-size:11px;cursor:pointer;border-radius:3px}
+  .btn:hover{border-color:var(--cyan);color:var(--cyan)}
+  .btn.primary{background:var(--green);color:#0a0e14;border-color:var(--green);font-weight:700}
+  .btn.primary:hover{background:var(--matrix);border-color:var(--matrix);color:#000}
+  .btn.danger{color:var(--red);border-color:#6E2A2E}
+  .btn.danger:hover{background:var(--red);color:#0a0e14}
+
+  .spacer{flex:1}
+
+  /* ---------------- summary banner ---------------- */
+  .banner{
+    padding:10px 14px;border:1px solid var(--rule);border-radius:4px;
+    margin-bottom:10px;background:var(--panel);
+    display:grid;grid-template-columns:repeat(8,auto);gap:4px 18px;align-items:baseline
+  }
+  .banner .lbl{color:var(--mute);font-size:10px;text-transform:uppercase;letter-spacing:.08em}
+  .banner .v{font-size:16px;font-weight:700;color:var(--yellow)}
+  .banner .v.sm{font-size:13px;color:var(--ink);font-weight:500}
+  .banner .v.green{color:var(--green)}
+  .banner .v.cyan{color:var(--cyan)}
+  .banner .v.red{color:var(--red)}
+  .banner .v.orange{color:var(--orange)}
+
+  /* ---------------- gradient heat-bar ---------------- */
+  .hbar{
+    display:inline-block;
+    width:140px;height:10px;border-radius:2px;
+    background:var(--dim);
+    position:relative;vertical-align:middle;overflow:hidden
+  }
+  .hbar::before{
+    content:'';position:absolute;top:0;left:0;bottom:0;
+    width:var(--fill,0%);
+    background:var(--heat);
+    background-size:140px 100%;
+  }
+  /* before/after governor cut line */
+  .hbar::after{
+    content:'';position:absolute;top:-2px;bottom:-2px;
+    left:var(--cut,0%);
+    width:2px;background:#E11D48;
+    box-shadow:0 0 4px rgba(225,29,72,.7);
+    display:var(--cut-show,none);
+  }
+  .hbar.wide{width:240px}
+  .hbar.wide::before{background-size:240px 100%}
+  .hbar.narrow{width:80px}
+  .hbar.narrow::before{background-size:80px 100%}
+
+  /* ---------------- tables ---------------- */
+  table.dense{width:100%;border-collapse:collapse;font-size:12px}
+  table.dense td{padding:2px 4px;vertical-align:middle}
+  table.dense td.num{text-align:right;font-variant-numeric:tabular-nums}
+  table.dense td.lbl{color:var(--mute)}
+  table.dense th{padding:2px 4px;color:var(--mute);font-weight:500;text-transform:uppercase;font-size:10px;letter-spacing:.06em;border-bottom:1px dashed var(--rule);text-align:left}
+  table.dense th.num{text-align:right}
+  table.dense tr:hover td{background:var(--bg2)}
+  .mono{font-family:inherit;color:var(--ink)}
+  .cyan{color:var(--cyan)} .green{color:var(--green)} .yellow{color:var(--yellow)}
+  .orange{color:var(--orange)} .red{color:var(--red)} .magenta{color:var(--magenta)} .mute{color:var(--mute)}
+
+  /* ---------------- kpi row ---------------- */
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px}
+  .kpi{border:1px solid var(--rule);border-radius:4px;padding:10px 12px;background:var(--panel);position:relative}
+  .kpi .lbl{color:var(--mute);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+  .kpi .v{font-size:22px;font-weight:700;color:var(--yellow);line-height:1}
+  .kpi .sub{color:var(--mute);font-size:10px;margin-top:4px}
+  .kpi.green .v{color:var(--green)} .kpi.cyan .v{color:var(--cyan)} .kpi.red .v{color:var(--red)} .kpi.orange .v{color:var(--orange)}
+  @media (max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}}
+
+  /* ---------------- governor strip ---------------- */
+  .govstrip{
+    display:flex;align-items:center;gap:14px;padding:8px 12px;
+    border:1px solid var(--rule);border-radius:4px;margin-bottom:10px;background:var(--panel);
+    font-size:12px;flex-wrap:wrap
+  }
+  .govstrip .tag{padding:2px 8px;border-radius:3px;background:var(--dim);color:var(--ink);font-size:11px}
+  .govstrip .tag.on{background:#103a1c;color:var(--green)}
+  .govstrip .tag.off{background:#3a1012;color:var(--red)}
+
+  /* ---------------- insights ---------------- */
+  .insights{display:flex;flex-direction:column;gap:3px;font-size:12px}
+  .insight{padding:4px 8px;border-left:2px solid var(--cyan);background:var(--bg2);line-height:1.45}
+  .insight.ok{border-left-color:var(--green)}
+  .insight.hot{border-left-color:var(--red)}
+  .insight.warm{border-left-color:var(--orange)}
+  .insight.mag{border-left-color:var(--magenta)}
+  .insight b{color:var(--ink)}
+  .insight .m{color:var(--mute);font-size:11px}
+
+  /* ---------------- heatmap ---------------- */
+  .heatmap{display:grid;grid-template-columns:24px repeat(var(--weeks,12),14px);gap:2px;font-size:9px;color:var(--mute);justify-content:start}
+  .heatmap .cell{width:14px;height:14px;border-radius:2px;background:var(--dim);position:relative;cursor:pointer}
+  .heatmap .cell:hover{outline:1px solid var(--cyan);z-index:5}
+  .heatmap .wk{text-align:center;font-size:9px;line-height:14px;color:var(--cyan);font-weight:600}
+  .heatmap .dow{padding:0 4px 0 0;text-align:right;white-space:nowrap;font-size:9px;line-height:14px}
+
+  /* ---------------- quadrant ---------------- */
+  .qlegend{display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--mute);margin-top:6px}
+  .qdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+  .qdot.green{background:var(--green)} .qdot.yellow{background:var(--yellow)} .qdot.red{background:var(--red)}
+
+  /* ---------------- forecast ---------------- */
+  .fct{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .fct .big{font-size:26px;font-weight:700;color:var(--green)}
+  .fct .rng{color:var(--mute);font-size:11px}
+
+  /* ---------------- modal ---------------- */
+  .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:100}
+  .backdrop.open{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--rule);border-radius:4px;width:min(720px,94vw);max-height:92vh;overflow:auto;padding:18px}
+  .modal h2{margin:0 0 4px;font-size:14px;color:var(--yellow);text-transform:uppercase;letter-spacing:.08em}
+  .modal .sub{color:var(--mute);font-size:11px;margin-bottom:14px}
+  .crow{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--rule);gap:12px}
+  .crow:last-child{border-bottom:none}
+  .crow .nm{font-size:12px}
+  .crow .ds{font-size:10px;color:var(--mute);margin-top:2px}
+  .switch{position:relative;width:36px;height:18px;background:var(--dim);border-radius:2px;cursor:pointer;flex-shrink:0;border:1px solid var(--rule)}
+  .switch::after{content:'';position:absolute;top:1px;left:1px;width:14px;height:14px;background:var(--mute);border-radius:1px;transition:all .1s}
+  .switch.on{background:#103a1c;border-color:var(--green)}
+  .switch.on::after{left:19px;background:var(--green)}
+  .slider{display:flex;align-items:center;gap:8px;min-width:240px}
+  .slider input[type=range]{flex:1;accent-color:var(--cyan)}
+  .slider .val{color:var(--yellow);font-size:11px;min-width:80px;text-align:right}
+
+  .livesav{margin-top:14px;padding:10px 12px;border:1px dashed var(--green);border-radius:4px;background:var(--bg2)}
+  .livesav .big{font-size:24px;font-weight:700;color:var(--green);line-height:1}
+  .livesav .lbl{color:var(--mute);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+  .livesav .note{color:var(--mute);font-size:10px;margin-top:6px}
+
+  .mfoot{display:flex;justify-content:space-between;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--rule)}
+
+  /* ---------------- admin key row ---------------- */
+  .keyrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px}
+  .keyrow .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .keyrow .dot.ok{background:var(--green)}
+  .keyrow .dot.off{background:var(--mute)}
+  .keyrow .dot.hot{background:var(--red)}
+  .keyrow input.key{background:var(--bg2);border:1px solid var(--rule);padding:4px 8px;color:var(--ink);font:inherit;font-size:12px;border-radius:3px;min-width:260px;outline:none}
+  .keyrow input.key:focus{border-color:var(--cyan)}
+
+  /* ---------------- scanline (matrix flair) ---------------- */
+  .matrix-flair{
+    position:fixed;inset:0;pointer-events:none;z-index:1;
+    background:repeating-linear-gradient(0deg, rgba(127,217,98,.012) 0, rgba(127,217,98,.012) 1px, transparent 1px, transparent 3px);
+    mix-blend-mode:screen;
+  }
+  html[data-theme="anthropic"] .matrix-flair{display:none}
+
+  /* ---------------- footer bar ---------------- */
+  .footbar{
+    position:fixed;bottom:0;left:0;right:0;
+    padding:8px 16px;border-top:1px solid var(--rule);
+    background:var(--bg);display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--mute);z-index:10
+  }
+  .footbar .k{color:var(--yellow);font-weight:700}
+  .footbar .sep{color:var(--dim)}
+
+  code.kv{color:var(--matrix);font-family:inherit}
+  html[data-theme="anthropic"] code.kv{color:var(--orange)}
+
+  .empty{color:var(--mute);font-size:11px;padding:14px;text-align:center}
+  .spinner{display:inline-block;width:8px;height:8px;border:1.5px solid var(--dim);border-top-color:var(--cyan);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:5px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+</style>
+</head>
+<body data-theme="dark">
+<div class="matrix-flair"></div>
+
+<!-- ============== TOP BAR ============== -->
+<div class="topbar">
+  <span class="logo">▓▓▒░ <span class="accent">CostBurn</span> ░▒▓▓</span>
+  <span class="pill" id="periodLabel">30 Days</span>
+
+  <div class="tabs" id="tabs">
+    <div class="tab" data-p="Today">today</div>
+    <div class="tab" data-p="7 Days">7d</div>
+    <div class="tab active" data-p="30 Days">30d</div>
+    <div class="tab" data-p="This Month">month</div>
+    <div class="tab" data-p="All Time">all</div>
+  </div>
+  <select id="monthSel" class="monthSel" title="pick month">
+    <option value="">month...</option>
+  </select>
+
+  <div class="spacer"></div>
+
+  <div class="seg" id="themeSeg" title="theme">
+    <div class="opt active" data-theme="dark">DARK</div>
+    <div class="opt" data-theme="anthropic">ANTHROPIC</div>
+  </div>
+  <button class="btn" id="refreshBtn">↻ REFRESH</button>
+  <button class="btn" id="govResetBtn" title="reset governor dropdowns to defaults">⚙ RESET</button>
+</div>
+
+<!-- ============== STATUS LINE ============== -->
+<div class="banner" id="statusLine">
+  <div><div class="lbl">Status</div><div id="dataStatus" class="v sm"><span class="spinner"></span>booting...</div></div>
+  <div><div class="lbl">Generated</div><div id="gen" class="v sm">—</div></div>
+  <div class="spacer"></div>
+  <div style="grid-column: 8 / 9"><div class="lbl">Governor</div><div id="govStripInline" class="v sm">—</div></div>
+</div>
+
+<!-- ============== KPI STRIP ============== -->
+<div class="kpis" id="kpis"></div>
+
+<!-- ============== CONTROL RACK ============== -->
+<div class="panel green" style="margin-bottom:10px">
+  <div class="title">COST CONTROL RACK</div>
+  <div class="meta">pick choice per lever · instant rebuild</div>
+  <div id="controlRack" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px 14px"></div>
+  <div id="rackResults" style="margin-top:12px;padding:10px 12px;border:1px dashed var(--green);border-radius:4px;background:var(--bg2);display:grid;grid-template-columns:repeat(4,1fr);gap:4px 18px;align-items:baseline"></div>
+</div>
+
+<!-- ============== ROW 1: INSIGHTS + FORECAST (top priority) ============== -->
+<div class="g-23">
+  <div class="panel magenta">
+    <div class="title">SIGNAL / INSIGHTS</div>
+    <div class="meta">auto-derived · top cost-cut signals</div>
+    <div class="insights" id="insights"></div>
+  </div>
+  <div class="panel red">
+    <div class="title">7-DAY FORECAST</div>
+    <div class="meta">p50 ± p90</div>
+    <div id="forecast"></div>
+  </div>
+</div>
+
+<!-- ============== ROW 2: PARETO + QUADRANT ============== -->
+<div class="g2">
+  <div class="panel yellow">
+    <div class="title">COST CONCENTRATION</div>
+    <div class="meta">cumulative pareto · where cuts pay</div>
+    <canvas id="pareto" height="180"></canvas>
+    <div id="paretoNote" class="mute" style="font-size:10px;margin-top:6px"></div>
+  </div>
+  <div class="panel cyan">
+    <div class="title">EFFICIENCY QUADRANT</div>
+    <div class="meta">turns × $/turn · r=cost</div>
+    <canvas id="quadrant" height="220"></canvas>
+    <div class="qlegend">
+      <span><span class="qdot green"></span>efficient</span>
+      <span><span class="qdot yellow"></span>watch</span>
+      <span><span class="qdot red"></span>runaway (fork)</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============== ROW 3: HEATMAP + ACTIVITY MIX ============== -->
+<div class="g-32">
+  <div class="panel blue">
+    <div class="title">BURN HEATMAP</div>
+    <div class="meta">week × dow</div>
+    <div id="heatmap"></div>
+  </div>
+  <div class="panel green">
+    <div class="title">ACTIVITY MIX</div>
+    <div class="meta">local turns</div>
+    <table class="dense" id="activity"></table>
+  </div>
+</div>
+
+<!-- ============== ROW 4: DAILY + PROJECTS ============== -->
+<div class="g-32">
+  <div class="panel cyan">
+    <div class="title">DAILY ACTIVITY</div>
+    <div class="meta" id="dailyMeta"></div>
+    <table class="dense" id="daily"></table>
+  </div>
+  <div class="panel yellow">
+    <div class="title">BY PROJECT</div>
+    <div class="meta" id="projMeta">local</div>
+    <table class="dense" id="projects"></table>
+  </div>
+</div>
+
+<!-- ============== ROW 5: SESSIONS + MODELS ============== -->
+<div class="g-32">
+  <div class="panel orange">
+    <div class="title">TOP SESSIONS</div>
+    <div class="meta" id="sessMeta">local</div>
+    <table class="dense" id="sessions"></table>
+  </div>
+  <div class="panel green">
+    <div class="title">BY MODEL</div>
+    <div class="meta" id="modelMeta">anthropic</div>
+    <table class="dense" id="models"></table>
+  </div>
+</div>
+
+<!-- ============== ROW 6: TOOLS + SHELL ============== -->
+<div class="g2">
+  <div class="panel cyan">
+    <div class="title">CORE TOOLS</div>
+    <div class="meta">all-time</div>
+    <table class="dense" id="tools"></table>
+  </div>
+  <div class="panel orange">
+    <div class="title">SHELL COMMANDS</div>
+    <div class="meta">all-time</div>
+    <table class="dense" id="shell"></table>
+  </div>
+</div>
+
+<!-- ============== ADMIN KEY ============== -->
+<div class="panel red">
+  <div class="title">ADMIN KEY</div>
+  <div class="meta">keychain-backed</div>
+  <div id="adminKey"></div>
+</div>
+
+<!-- ============== FOOTER ============== -->
+<div class="footbar">
+  <span><span class="k">g</span> governor</span>
+  <span class="sep">│</span>
+  <span><span class="k">r</span> refresh</span>
+  <span class="sep">│</span>
+  <span><span class="k">1</span> today <span class="k">2</span> 7d <span class="k">3</span> 30d <span class="k">4</span> month <span class="k">5</span> all</span>
+  <span class="sep">│</span>
+  <span><span class="k">t</span> theme</span>
+  <span class="spacer"></span>
+  <span class="mute">CostBurn TUI v2 · data local + api.anthropic.com</span>
+</div>
+
+<!-- governor modal removed; controls are now inline dropdowns -->
+
+<!-- =================================== JS =================================== -->
+<script>
+const $ = id => document.getElementById(id);
+const fmtUSD = n => '$' + (Math.abs(n)>=1000 ? (n/1000).toFixed(2)+'k' : n.toFixed(2));
+const fmtInt = n => Math.round(n).toLocaleString();
+const fmtK   = n => n>=1_000_000 ? (n/1_000_000).toFixed(1)+'M' : n>=1000 ? (n/1000).toFixed(1)+'k' : Math.round(n);
+const basename = p => p.split('/').slice(-2).join('/');
+const shortSess = s => s.slice(0,8);
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+
+Chart.defaults.font.family = 'JetBrains Mono, Menlo, monospace';
+Chart.defaults.font.size = 10;
+
+// ================== state ==================
+let DATA = null;
+let ANTHROPIC_RAW = null, ANTHROPIC_CACHE = {};
+let currentPeriod = '30 Days';
+let charts = {};
+let adminKeyInfo = { hasKey:false };
+
+// ================== governor: 6 cost levers, each with preset choices ==================
+// Each choice has an `agg` contribution (added to aggression factor, capped at 0.70 total).
+const LEVERS = [
+  { key:'session', label:'Session discipline',     desc:'Max turns before fork suggestion',
+    opts:[
+      {v:'off',       label:'off (no cap)',                   agg:0.00, tag:'no cap'},
+      {v:'lenient',   label:'lenient · 1500 turns',           agg:0.05, tag:'1500t'},
+      {v:'balanced',  label:'balanced · 750 turns',           agg:0.15, tag:'750t'},
+      {v:'strict',    label:'strict · 300 turns',             agg:0.28, tag:'300t'},
+      {v:'surgical',  label:'surgical · 150 turns',           agg:0.38, tag:'150t'},
+    ], def:'balanced' },
+  { key:'cacheRead', label:'Context bloat threshold', desc:'Cache-read tok/turn that fires warn/block',
+    opts:[
+      {v:'off',       label:'off',                             agg:0.00, tag:'off'},
+      {v:'warnonly',  label:'warn only · 300K/turn',           agg:0.10, tag:'300K'},
+      {v:'balanced',  label:'balanced · 200K warn / 400K blk', agg:0.20, tag:'200/400K'},
+      {v:'aggressive',label:'aggressive · 100K / 250K',        agg:0.30, tag:'100/250K'},
+      {v:'paranoid',  label:'paranoid · 50K / 150K',           agg:0.38, tag:'50/150K'},
+    ], def:'balanced' },
+  { key:'phase',    label:'Phase-boundary behavior', desc:'When you say "now build X"',
+    opts:[
+      {v:'ignore',    label:'ignore',                          agg:0.00, tag:'ignore'},
+      {v:'tag',       label:'tag only (passive)',              agg:0.04, tag:'tag'},
+      {v:'advise',    label:'advise · suggest /cost-fork',     agg:0.12, tag:'advise'},
+      {v:'autocompact',label:'auto /compact on shift',          agg:0.22, tag:'auto'},
+    ], def:'advise' },
+  { key:'retry',    label:'Retry-loop response',    desc:'3+ similar errors in 1 hour',
+    opts:[
+      {v:'ignore',    label:'ignore',                          agg:0.00, tag:'ignore'},
+      {v:'advise',    label:'advise once',                     agg:0.05, tag:'advise'},
+      {v:'force',     label:'force scoped fork',               agg:0.12, tag:'fork'},
+      {v:'block',     label:'block Agent spawns',              agg:0.18, tag:'block'},
+    ], def:'advise' },
+  { key:'routing',  label:'Model routing',          desc:'Route lightweight work to Haiku',
+    opts:[
+      {v:'off',       label:'off · all Opus',                   agg:0.00, tag:'Opus'},
+      {v:'opportunistic',label:'opportunistic · manual',        agg:0.08, tag:'manual'},
+      {v:'aggressive',label:'aggressive · Haiku for reads/edits',agg:0.20, tag:'Haiku reads'},
+      {v:'max',       label:'max · Haiku except diagnostics',   agg:0.32, tag:'max Haiku'},
+    ], def:'opportunistic' },
+  { key:'budget',   label:'Daily USD cap',          desc:'Hard cap on daily spend',
+    opts:[
+      {v:'none',      label:'none',                              agg:0.00, tag:'none'},
+      {v:'generous',  label:'generous · $250/day',               agg:0.04, tag:'$250'},
+      {v:'standard',  label:'standard · $100/day',               agg:0.10, tag:'$100'},
+      {v:'tight',     label:'tight · $50/day',                   agg:0.18, tag:'$50'},
+      {v:'startup',   label:'startup · $25/day',                 agg:0.28, tag:'$25'},
+    ], def:'none' },
+];
+const DEFAULT_GOV = Object.fromEntries(LEVERS.map(l => [l.key, l.def]));
+let GOV = loadGov();
+function loadGov(){ try{ const r=localStorage.getItem('costburn.gov'); return r?{...DEFAULT_GOV,...JSON.parse(r)}:{...DEFAULT_GOV}; }catch{ return {...DEFAULT_GOV}; } }
+function saveGov(){ try{ localStorage.setItem('costburn.gov', JSON.stringify(GOV)); }catch{} }
+function leverChoice(key){ const L = LEVERS.find(l=>l.key===key); return L ? (L.opts.find(o=>o.v===GOV[key]) || L.opts.find(o=>o.v===L.def)) : null; }
+
+function setTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  document.body.setAttribute('data-theme', t);
+  try{ localStorage.setItem('codeburn.theme', t); }catch{}
+  document.querySelectorAll('#themeSeg .opt').forEach(o=>o.classList.toggle('active', o.dataset.theme===t));
+  const cs = getComputedStyle(document.documentElement);
+  Chart.defaults.color = cs.getPropertyValue('--mute').trim();
+  Chart.defaults.borderColor = cs.getPropertyValue('--rule').trim();
+  if (DATA) render();
+}
+
+// ================== period ==================
+function periodRange(label){
+  const now = new Date(); const today = now.toISOString().slice(0,10);
+  if (label==='Today') return { since: today, until: today };
+  if (label==='7 Days'){ const d=new Date(now); d.setDate(d.getDate()-6); return { since:d.toISOString().slice(0,10), until:today }; }
+  if (label==='30 Days'){ const d=new Date(now); d.setDate(d.getDate()-29); return { since:d.toISOString().slice(0,10), until:today }; }
+  if (label==='This Month') return { since: today.slice(0,7)+'-01', until: today };
+  if (label.startsWith('Month:')){
+    const ym=label.slice(6); const [y,m]=ym.split('-').map(Number);
+    const last=new Date(y,m,0); return { since: ym+'-01', until: today.slice(0,7)===ym ? today : last.toISOString().slice(0,10) };
+  }
+  return { since:'0000-00-00', until: today };
+}
+function monthLabel(ym){ const [y,m]=ym.split('-').map(Number); return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1]+' '+y; }
+function collectMonths(){
+  const set=new Set();
+  (DATA?.sessions||[]).forEach(s=>set.add(s['Started At'].slice(0,7)));
+  if(ANTHROPIC_RAW){ Object.keys(ANTHROPIC_RAW.costByDay).forEach(d=>set.add(d.slice(0,7))); Object.keys(ANTHROPIC_RAW.usageByDay).forEach(d=>set.add(d.slice(0,7))); }
+  return [...set].filter(Boolean).sort().reverse();
+}
+function populateMonths(){
+  const sel = $('monthSel'); const cur = sel.value; const months = collectMonths();
+  sel.innerHTML = '<option value="">month...</option>' + months.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join('');
+  if (cur && months.includes(cur)) sel.value = cur;
+}
+
+// ================== data ==================
+async function bootstrap(){
+  DATA = await fetch('./data.json').then(r=>r.json());
+  $('gen').textContent = new Date(DATA.generated).toLocaleString();
+  populateMonths();
+  await refreshAdminKeyCard();
+  // Warm-start from cached anthropic data (survives rate limits/restarts)
+  const cached = loadCachedAnthropic();
+  if (cached) { ANTHROPIC_RAW = { costByDay: cached.costByDay, usageByDay: cached.usageByDay }; ANTHROPIC_CACHE = {}; }
+  // Render immediately using local data + any cached anthropic snapshot.
+  if (cached) {
+    const age = Math.round((Date.now() - (cached.savedAt||0)) / 60000);
+    setStatus('ok', `anthropic cached · ${Object.keys(ANTHROPIC_RAW.costByDay).length} days spend (${age}m old)`);
+  } else if (!adminKeyInfo.hasKey) {
+    setStatus('warm','no admin key · showing local estimates · paste sk-ant-admin01-...');
+  } else {
+    setStatus('loading','fetching api.anthropic.com in background...');
+  }
+  populateMonths();
+  render();
+  // Background refresh (non-blocking).
+  if (adminKeyInfo.hasKey) {
+    prefetchAll().then(() => {
+      setStatus('ok', `anthropic cached · ${Object.keys(ANTHROPIC_RAW.costByDay).length} days spend`);
+      populateMonths();
+      render();
+    }).catch(e => {
+      if (cached) {
+        const age = Math.round((Date.now() - (cached.savedAt||0)) / 60000);
+        setStatus('warm', `anthropic fetch failed (${e.message}) · using cached data from ${age}m ago`);
+      } else {
+        setStatus('warm', 'anthropic unavailable ('+e.message+') · showing local estimates');
+      }
+    });
+  }
+}
+function setStatus(cls,txt){ const el=$('dataStatus'); el.className='v sm '+(cls==='ok'?'green':cls==='hot'?'red':'cyan'); el.innerHTML=(cls==='loading'?'<span class="spinner"></span>':'')+txt; }
+
+const ANTHROPIC_CACHE_KEY = 'costburn.anthropic.raw.v1';
+function loadCachedAnthropic(){
+  try {
+    const raw = localStorage.getItem(ANTHROPIC_CACHE_KEY);
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    if (!j.costByDay || !j.usageByDay) return null;
+    return j;
+  } catch { return null; }
+}
+function saveCachedAnthropic(){ try { localStorage.setItem(ANTHROPIC_CACHE_KEY, JSON.stringify({ ...ANTHROPIC_RAW, savedAt: Date.now() })); } catch {} }
+
+async function prefetchAll(){
+  const end=new Date().toISOString().slice(0,19)+'Z', start='2024-01-01T00:00:00Z';
+  const [cost, usage] = await Promise.all([
+    fetch('/api/anthropic/cost?start='+encodeURIComponent(start)+'&end='+encodeURIComponent(end)).then(r=>r.json()),
+    fetch('/api/anthropic/usage?start='+encodeURIComponent(start)+'&end='+encodeURIComponent(end)+'&bucket=1d').then(r=>r.json()),
+  ]);
+  if(cost.error) throw new Error('cost: '+cost.error);
+  if(usage.error) throw new Error('usage: '+usage.error);
+  const costByDay={}; (cost.data||[]).forEach(b=>{ const d=(b.starting_at||'').slice(0,10); if(!d) return; let a=0; (b.results||[]).forEach(r=>a+=parseFloat(r.amount||0)); costByDay[d]=(costByDay[d]||0)+a; });
+  const usageByDay={}; (usage.data||[]).forEach(b=>{ const d=(b.starting_at||'').slice(0,10); if(!d) return; const rows=usageByDay[d]=usageByDay[d]||[]; (b.results||[]).forEach(r=>rows.push({ model:r.model||'unknown', inT:+(r.uncached_input_tokens||0), outT:+(r.output_tokens||0), cacheR:+(r.cache_read_input_tokens||0), cacheW:+(r.cache_creation_input_tokens||0) })); });
+  ANTHROPIC_RAW={costByDay,usageByDay}; ANTHROPIC_CACHE={};
+  saveCachedAnthropic();
+}
+
+// Build a local-only view from codeburn sessions when Anthropic is unavailable.
+// Tokens are not in session export → we approximate from cost using Opus 4 blended rate
+// (roughly 50% cache-read, 10% cache-write, 30% output, 10% input of Opus spend).
+function localFallbackView(label){
+  const {since, until} = periodRange(label);
+  const sess = DATA.sessions.filter(s=>{ const d=s['Started At'].slice(0,10); return d>=since && d<=until; });
+  if (!sess.length) return { cost:0, daily:[], models:[], tokensIn:0, tokensOut:0, cacheR:0, cacheW:0, _source:'local' };
+  const byDay = {};
+  let total=0;
+  sess.forEach(s=>{
+    const d=s['Started At'].slice(0,10);
+    byDay[d] = (byDay[d]||0) + s['Cost (USD)'];
+    total += s['Cost (USD)'];
+  });
+  // Reverse from cost using Opus 4 blended rate weights
+  // cache_read $1.50/M, cache_write $18.75/M, output $75/M, input $15/M
+  // Spend split on long-running sessions is empirically ~75% cache-read, ~15% cache-write, ~8% output, ~2% input
+  const crShare=0.75, cwShare=0.15, outShare=0.08, inShare=0.02;
+  const cacheR = total * crShare / 1.5 * 1e6;
+  const cacheW = total * cwShare / 18.75 * 1e6;
+  const tokensOut = total * outShare / 75 * 1e6;
+  const tokensIn = total * inShare / 15 * 1e6;
+  const daily = Object.entries(byDay).sort().map(([Date, Cost])=>({
+    Date,
+    'Cost (USD)': Cost,
+    'Output Tokens': Cost * outShare / 75 * 1e6,
+    'Input Tokens': Cost * inShare / 15 * 1e6,
+    'Cache Read Tokens': Cost * crShare / 1.5 * 1e6,
+    'Cache Write Tokens': Cost * cwShare / 18.75 * 1e6,
+  }));
+  return { cost: total, daily, models: [], tokensIn, tokensOut, cacheR, cacheW, _source:'local' };
+}
+function derive(label){
+  if(!ANTHROPIC_RAW) return null;
+  if(ANTHROPIC_CACHE[label]) return ANTHROPIC_CACHE[label];
+  const {since,until} = periodRange(label);
+  const daily=[]; let tC=0,tI=0,tO=0,tCR=0,tCW=0; const ma={};
+  const allDays=new Set([...Object.keys(ANTHROPIC_RAW.costByDay),...Object.keys(ANTHROPIC_RAW.usageByDay)]);
+  [...allDays].filter(d=>d>=since && d<=until).sort().forEach(day=>{
+    const cost=ANTHROPIC_RAW.costByDay[day]||0; const rows=ANTHROPIC_RAW.usageByDay[day]||[];
+    let dI=0,dO=0,dCR=0,dCW=0;
+    rows.forEach(r=>{ dI+=r.inT; dO+=r.outT; dCR+=r.cacheR; dCW+=r.cacheW; ma[r.model]=ma[r.model]||{Model:r.model,'Cost (USD)':0,tokens:0,cacheR:0}; ma[r.model].tokens+=r.inT+r.outT+r.cacheR; ma[r.model].cacheR+=r.cacheR; });
+    tC+=cost; tI+=dI; tO+=dO; tCR+=dCR; tCW+=dCW;
+    if(cost===0 && dI===0 && dO===0 && dCR===0) return;
+    daily.push({Date:day,'Cost (USD)':cost,'Input Tokens':dI,'Output Tokens':dO,'Cache Read Tokens':dCR,'Cache Write Tokens':dCW});
+  });
+  const tok=Object.values(ma).reduce((a,m)=>a+m.tokens,0)||1;
+  Object.values(ma).forEach(m=>{ m['Cost (USD)']=tC*(m.tokens/tok); m['Cache Hit']=m.tokens? m.cacheR/m.tokens*100:0; });
+  const r={daily,totalCost:tC,totalIn:tI,totalOut:tO,totalCacheR:tCR,totalCacheW:tCW,models:Object.values(ma).sort((a,b)=>b['Cost (USD)']-a['Cost (USD)'])};
+  ANTHROPIC_CACHE[label]=r; return r;
+}
+
+// ================== savings model ==================
+function computeSavings(view, gov=GOV){
+  if(!view || !view.cost) return { cacheReadCost:0, aggression:0, saved:0, remaining:0, pctCacheRead:0, perLever:[] };
+  const approxCR=view.cacheR*1.5/1e6, approxOut=view.tokensOut*75/1e6, approxIn=view.tokensIn*15/1e6, approxCW=view.cacheW*18.75/1e6;
+  const approx = approxCR + approxOut + approxIn + approxCW;
+  const crShare = approx>0 ? approxCR/approx : 0;
+  const crCost = view.cost * crShare;
+  let agg = 0;
+  const perLever = [];
+  LEVERS.forEach(L => {
+    const opt = (L.opts.find(o=>o.v===gov[L.key]) || L.opts.find(o=>o.v===L.def));
+    perLever.push({ key:L.key, label:L.label, choice:opt.label, tag:opt.tag, agg:opt.agg });
+    agg += opt.agg;
+  });
+  agg = clamp(agg, 0, .70);
+  const saved = crCost * agg;
+  return { cacheReadCost:crCost, aggression:agg, saved, remaining:view.cost-saved, pctCacheRead:crShare, perLever };
+}
+
+function renderControlRack(){
+  const el = $('controlRack');
+  el.innerHTML = LEVERS.map(L => {
+    const opts = L.opts.map(o => `<option value="${o.v}" ${o.v===GOV[L.key]?'selected':''}>${o.label}</option>`).join('');
+    return `
+      <div>
+        <div style="font-size:10px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px">${L.label}</div>
+        <select class="monthSel" style="width:100%" data-lever="${L.key}">${opts}</select>
+        <div style="font-size:10px;color:var(--mute);margin-top:3px">${L.desc}</div>
+      </div>`;
+  }).join('');
+  el.querySelectorAll('select[data-lever]').forEach(s => {
+    s.addEventListener('change', () => {
+      GOV[s.dataset.lever] = s.value;
+      saveGov();
+      render();   // full rebuild
+    });
+  });
+}
+
+function renderRackResults(view, sav){
+  const el = $('rackResults');
+  if (!view.cost) { el.innerHTML = '<div class="empty" style="grid-column:1/-1">no data in current period</div>'; return; }
+  const savePct = view.cost > 0 ? sav.saved/view.cost*100 : 0;
+  el.innerHTML = `
+    <div><div style="font-size:10px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em">Actual</div><div style="font-family:'JetBrains Mono';font-size:22px;font-weight:700;color:var(--yellow)">${fmtUSD(view.cost)}</div></div>
+    <div><div style="font-size:10px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em">With governor</div><div style="font-family:'JetBrains Mono';font-size:22px;font-weight:700;color:var(--green)">${fmtUSD(sav.remaining)}</div></div>
+    <div><div style="font-size:10px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em">Saves</div><div style="font-family:'JetBrains Mono';font-size:22px;font-weight:700;color:var(--matrix)">${fmtUSD(sav.saved)}</div><div style="font-size:10px;color:var(--mute)">${savePct.toFixed(1)}% · ${(sav.aggression*100).toFixed(0)}% of c-read</div></div>
+    <div><div style="font-size:10px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em">Stack</div><div style="font-size:11px;line-height:1.6">${sav.perLever.map(p => `<span class="tag" style="display:inline-block;padding:1px 6px;border-radius:2px;background:var(--dim);color:${p.agg>0?'var(--green)':'var(--mute)'};margin-right:4px;margin-bottom:2px;font-size:10px">${p.tag} <span style="color:var(--mute)">+${(p.agg*100).toFixed(0)}%</span></span>`).join('')}</div></div>
+  `;
+}
+
+// ================== render ==================
+function render(){
+  const isMonth = currentPeriod.startsWith('Month:');
+  const label = isMonth ? monthLabel(currentPeriod.slice(6)) : currentPeriod;
+  $('periodLabel').textContent = label;
+  document.querySelectorAll('#tabs .tab').forEach(t=>t.classList.toggle('active', !isMonth && t.dataset.p===currentPeriod));
+  const sel = $('monthSel'); sel.classList.toggle('active', isMonth);
+  if (isMonth) sel.value = currentPeriod.slice(6); else sel.value='';
+
+  const a = adminKeyInfo.hasKey ? derive(currentPeriod) : null;
+  let view;
+  if (a) {
+    view = {
+      cost: a.totalCost, daily: a.daily, models: a.models,
+      tokensIn: a.totalIn, tokensOut: a.totalOut, cacheR: a.totalCacheR, cacheW: a.totalCacheW,
+      source: 'anthropic',
+    };
+  } else {
+    const fb = localFallbackView(label);
+    view = fb || { cost:0, daily:[], models:[], tokensIn:0, tokensOut:0, cacheR:0, cacheW:0, source:'empty' };
+  }
+
+  const {since,until} = periodRange(currentPeriod);
+  const sessInPeriod = DATA.sessions.filter(s=>{ const d=s['Started At'].slice(0,10); return (!since||d>=since)&&(!until||d<=until); });
+
+  const sav = computeSavings(view);
+  CUR_AGG = sav.aggression || 0;
+  const cacheHit = (view.cacheR+view.tokensIn)>0 ? (view.cacheR/(view.cacheR+view.tokensIn)*100) : null;
+
+  // -------- status strip --------
+  $('govStripInline').innerHTML = `<span class="green">ACTIVE</span> · saves <code class="kv">${fmtUSD(sav.saved)}</code> (${(sav.aggression*100).toFixed(0)}% of cache-read)`;
+
+  // -------- control rack --------
+  renderControlRack();
+  renderRackResults(view, sav);
+
+  // -------- KPIs --------
+  $('kpis').innerHTML = `
+    <div class="kpi"><div class="lbl">Actual spend</div><div class="v">${fmtUSD(view.cost)}</div><div class="sub">${view.daily.length} day(s) · avg ${fmtUSD(view.daily.length?view.cost/view.daily.length:0)}/d</div></div>
+    <div class="kpi green"><div class="lbl">With governor</div><div class="v">${fmtUSD(sav.remaining)}</div><div class="sub">save ~${fmtUSD(sav.saved)} · ${(sav.aggression*100).toFixed(0)}% of c-read</div></div>
+    <div class="kpi cyan"><div class="lbl">Cache hit</div><div class="v">${cacheHit===null?'n/a':cacheHit.toFixed(1)+'%'}</div><div class="sub">${fmtK(view.cacheR)} read / ${fmtK(view.cacheW)} written</div></div>
+    <div class="kpi orange"><div class="lbl">C-read share</div><div class="v">${(sav.pctCacheRead*100).toFixed(0)}%</div><div class="sub">${fmtUSD(sav.cacheReadCost)} drag</div></div>
+    <div class="kpi red"><div class="lbl">Sessions</div><div class="v">${sessInPeriod.length}</div><div class="sub">${fmtInt(sessInPeriod.reduce((a,s)=>a+s.Turns,0))} turns · local</div></div>
+  `;
+
+  // -------- Daily Activity --------
+  renderDaily(view.daily);
+  $('dailyMeta').textContent = (view.daily.length||0) + ' day(s)';
+
+  // -------- Projects --------
+  renderProjects(sessInPeriod);
+
+  // -------- Sessions --------
+  renderSessions(sessInPeriod);
+
+  // -------- Models --------
+  renderModels(view.models);
+
+  // -------- Insights --------
+  renderInsights(view, sessInPeriod, sav);
+
+  // -------- Forecast --------
+  renderForecast(view, sav);
+
+  // -------- Heatmap --------
+  renderHeatmap(sessInPeriod, since, until);
+
+  // -------- Quadrant --------
+  renderQuadrant(sessInPeriod, sav);
+
+  // -------- Pareto --------
+  renderPareto(sessInPeriod, sav);
+
+  // -------- Activity mix --------
+  renderActivityMix(sessInPeriod);
+
+  // -------- Tools / Shell --------
+  renderTools();
+  renderShell();
+}
+
+// ================== bar helper ==================
+let CUR_AGG = 0;
+function bar(pct, cls=''){
+  const fill = clamp(pct,0,100);
+  const cut = fill * (1 - CUR_AGG);
+  const showCut = CUR_AGG > 0.01 ? 'block' : 'none';
+  return `<span class="hbar ${cls}" style="--fill:${fill}%;--cut:${cut}%;--cut-show:${showCut}"></span>`;
+}
+
+// ================== renderers ==================
+function renderDaily(daily){
+  if(!daily.length){ $('daily').innerHTML = '<tr><td class="empty">no data</td></tr>'; return; }
+  const max = Math.max(...daily.map(d=>d['Cost (USD)']),1);
+  const head = '<thead><tr><th>date</th><th></th><th class="num">cost</th><th class="num">out</th><th class="num">c-read</th></tr></thead>';
+  const rows = daily.slice(-14).reverse().map(d=>{
+    const c = d['Cost (USD)'];
+    return `<tr><td class="mute">${d.Date.slice(5)}</td><td>${bar(c/max*100)}</td><td class="num yellow">${fmtUSD(c)}</td><td class="num mute">${fmtK(d['Output Tokens']||0)}</td><td class="num cyan">${fmtK(d['Cache Read Tokens']||0)}</td></tr>`;
+  }).join('');
+  $('daily').innerHTML = head+'<tbody>'+rows+'</tbody>';
+}
+
+function renderProjects(sessions){
+  const agg={};
+  sessions.forEach(s=>{ const k=s.Project; agg[k]=agg[k]||{cost:0,calls:0,sess:0,turns:0}; agg[k].cost+=s['Cost (USD)']; agg[k].calls+=s['API Calls']; agg[k].sess+=1; agg[k].turns+=s.Turns; });
+  const rows = Object.entries(agg).map(([k,v])=>({k,...v})).sort((a,b)=>b.cost-a.cost).slice(0,10);
+  if(!rows.length){ $('projects').innerHTML='<tr><td class="empty">no activity</td></tr>'; return; }
+  const max = Math.max(...rows.map(r=>r.cost),1);
+  const head = '<thead><tr><th>project</th><th></th><th class="num">cost</th><th class="num">$/sess</th><th class="num">sess</th></tr></thead>';
+  const body = rows.map(r=>`<tr><td>${basename(r.k)}</td><td>${bar(r.cost/max*100)}</td><td class="num yellow">${fmtUSD(r.cost)}</td><td class="num mute">${fmtUSD(r.cost/Math.max(r.sess,1))}</td><td class="num cyan">${r.sess}</td></tr>`).join('');
+  $('projects').innerHTML = head+'<tbody>'+body+'</tbody>';
+}
+
+function renderSessions(sessions){
+  const rows = sessions.slice().sort((a,b)=>b['Cost (USD)']-a['Cost (USD)']).slice(0,10);
+  if(!rows.length){ $('sessions').innerHTML='<tr><td class="empty">no activity</td></tr>'; return; }
+  const max = Math.max(...rows.map(r=>r['Cost (USD)']),1);
+  const head = '<thead><tr><th>session</th><th>project</th><th></th><th class="num">cost</th><th class="num">turns</th><th class="num">$/turn</th></tr></thead>';
+  const body = rows.map(s=>{
+    const c=s['Cost (USD)']; const cpt = s.Turns ? c/s.Turns : 0;
+    const cls = cpt>.80 ? 'red' : cpt>.40 ? 'orange' : cpt>.20 ? 'yellow' : 'green';
+    return `<tr><td class="cyan">${shortSess(s['Session ID'])}<div class="mute" style="font-size:10px">${s['Started At'].slice(0,10)}</div></td><td class="mute">${basename(s.Project)}</td><td>${bar(c/max*100)}</td><td class="num yellow">${fmtUSD(c)}</td><td class="num">${s.Turns}</td><td class="num ${cls}">${fmtUSD(cpt)}</td></tr>`;
+  }).join('');
+  $('sessions').innerHTML = head+'<tbody>'+body+'</tbody>';
+}
+
+function renderModels(models){
+  if(!models || !models.length){ $('models').innerHTML='<tr><td class="empty">admin key required for anthropic model split</td></tr>'; return; }
+  const rows = models.slice(0,8);
+  const max = Math.max(...rows.map(m=>m['Cost (USD)']),1);
+  const head = '<thead><tr><th>model</th><th></th><th class="num">cost</th><th class="num">cache</th><th class="num">tokens</th></tr></thead>';
+  const body = rows.map(m=>`<tr><td>${m.Model}</td><td>${bar(m['Cost (USD)']/max*100)}</td><td class="num yellow">${fmtUSD(m['Cost (USD)'])}</td><td class="num green">${m['Cache Hit'].toFixed(1)}%</td><td class="num mute">${fmtK(m.tokens)}</td></tr>`).join('');
+  $('models').innerHTML = head+'<tbody>'+body+'</tbody>';
+}
+
+function renderInsights(view, sessions, sav){
+  const items=[];
+  if (view.cost > 0) {
+    // Concentration: top-3 sessions
+    const sorted = sessions.slice().sort((a,b)=>b['Cost (USD)']-a['Cost (USD)']);
+    const top3 = sorted.slice(0,3).reduce((a,s)=>a+s['Cost (USD)'],0);
+    const totalSess = sessions.reduce((a,s)=>a+s['Cost (USD)'],0);
+    if (totalSess>0) {
+      const pct = top3/totalSess*100;
+      const cls = pct>70?'hot':pct>50?'warm':'ok';
+      items.push({cls, icon:'▶', text:`Top <b>3 sessions</b> consumed <b>${pct.toFixed(0)}%</b> of session spend ($${top3.toFixed(0)} of $${totalSess.toFixed(0)})`});
+    }
+
+    // Cache-read share
+    const crPct = sav.pctCacheRead*100;
+    if (crPct > 80) items.push({cls:'hot', icon:'▶', text:`<b>${crPct.toFixed(0)}%</b> of spend is <b>cache-read drag</b> (${fmtUSD(sav.cacheReadCost)}). Governor would target this.`});
+    else if (crPct > 60) items.push({cls:'warm', icon:'▶', text:`Cache-read is <b>${crPct.toFixed(0)}%</b> of spend — sessions are long. Compact or fork more often.`});
+
+    // Outlier days
+    if (view.daily.length >= 3) {
+      const costs = view.daily.map(d=>d['Cost (USD)']).filter(c=>c>0);
+      const mean = costs.reduce((a,b)=>a+b,0)/costs.length;
+      const sd   = Math.sqrt(costs.reduce((a,b)=>a+(b-mean)**2,0)/costs.length);
+      const outliers = view.daily.filter(d=>d['Cost (USD)'] > mean + 2*sd);
+      if (outliers.length > 0) {
+        items.push({cls:'warm', icon:'▶', text:`<b>${outliers.length}</b> 2σ outlier day(s): ${outliers.map(o=>o.Date.slice(5)+' ($'+o['Cost (USD)'].toFixed(0)+')').join(', ')}`});
+      }
+    }
+
+    // Long-session impact
+    const longSess = sessions.filter(s=>s.Turns > 500);
+    if (longSess.length > 0) {
+      const lc = longSess.reduce((a,s)=>a+s['Cost (USD)'],0);
+      items.push({cls:'hot', icon:'▶', text:`<b>${longSess.length}</b> session(s) over 500 turns · <b>${fmtUSD(lc)}</b> (${(lc/Math.max(totalSess,1)*100).toFixed(0)}% of local spend). These are fork candidates.`});
+    }
+
+    // Cost/turn distribution
+    const cpts = sessions.filter(s=>s.Turns>0).map(s=>s['Cost (USD)']/s.Turns);
+    if (cpts.length>0) {
+      const high = cpts.filter(c=>c>0.80).length;
+      if (high>0) items.push({cls:'mag', icon:'▶', text:`<b>${high}</b> session(s) at <b>>$0.80/turn</b> · classic cache-bloat signature.`});
+    }
+
+    // Peak weekday
+    const byDow = [0,0,0,0,0,0,0];
+    sessions.forEach(s=>{ const dow=new Date(s['Started At']).getUTCDay(); byDow[dow]+=s['Cost (USD)']; });
+    const dowNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const maxIdx = byDow.indexOf(Math.max(...byDow));
+    if (byDow[maxIdx]>0) items.push({cls:'ok', icon:'▶', text:`Peak burn day: <b>${dowNames[maxIdx]}</b> ($${byDow[maxIdx].toFixed(0)})`});
+  }
+
+  if (!items.length) items.push({cls:'ok',icon:'▶',text:'Not enough data yet for insights.'});
+  $('insights').innerHTML = items.map(i=>`<div class="insight ${i.cls}">${i.icon} ${i.text}</div>`).join('');
+}
+
+function renderForecast(view){
+  const el = $('forecast');
+  if (!view.daily.length) { el.innerHTML = '<div class="empty">no data</div>'; return; }
+  const costs = view.daily.map(d=>d['Cost (USD)']);
+  const n = costs.length;
+  const mean = costs.reduce((a,b)=>a+b,0)/n;
+  const sd = Math.sqrt(costs.reduce((a,b)=>a+(b-mean)**2,0)/n);
+  const fcMean = mean * 7;
+  const fcLow  = Math.max(0, (mean - sd) * 7);
+  const fcHigh = (mean + sd) * 7;
+  el.innerHTML = `
+    <div class="fct">
+      <div class="big">${fmtUSD(fcMean)}</div>
+      <div>
+        <div class="rng">range: ${fmtUSD(fcLow)} – ${fmtUSD(fcHigh)}</div>
+        <div class="rng">daily μ ${fmtUSD(mean)} · σ ${fmtUSD(sd)} · n=${n}</div>
+      </div>
+    </div>
+    <table class="dense" style="margin-top:8px"><thead><tr><th>horizon</th><th class="num">$p50</th><th class="num">$p90</th></tr></thead>
+    <tbody>
+      <tr><td class="mute">next 7d</td><td class="num green">${fmtUSD(fcMean)}</td><td class="num orange">${fmtUSD(fcHigh)}</td></tr>
+      <tr><td class="mute">next 30d</td><td class="num green">${fmtUSD(mean*30)}</td><td class="num orange">${fmtUSD((mean+sd)*30)}</td></tr>
+      <tr><td class="mute">EoM (@ today's rate)</td><td class="num yellow">${fmtUSD(mean*daysToEOM())}</td><td class="num red">${fmtUSD((mean+sd)*daysToEOM())}</td></tr>
+    </tbody></table>
+  `;
+}
+function daysToEOM(){ const now=new Date(); const eom=new Date(now.getFullYear(), now.getMonth()+1, 0); return Math.max(0, Math.ceil((eom-now)/86400000))+1; }
+
+function renderHeatmap(sessions, since, until){
+  // Aggregate cost by (yyyy-mm-dd) then project onto week grid.
+  const byDay={};
+  sessions.forEach(s=>{ const d=s['Started At'].slice(0,10); byDay[d]=(byDay[d]||0)+s['Cost (USD)']; });
+  // Build a grid of last 12 weeks × 7 dow.
+  const today = new Date();
+  today.setUTCHours(0,0,0,0);
+  const endDow = today.getUTCDay();                          // 0=Sun
+  const endOfWeek = new Date(today); endOfWeek.setUTCDate(today.getUTCDate() + (6-endDow));   // Sat
+  const WEEKS = 12;
+  const start = new Date(endOfWeek); start.setUTCDate(endOfWeek.getUTCDate() - (WEEKS*7 - 1));
+  const cells=[];
+  for (let w=0; w<WEEKS; w++){
+    const row=[];
+    for (let d=0; d<7; d++){
+      const dt = new Date(start); dt.setUTCDate(start.getUTCDate() + w*7 + d);
+      const key = dt.toISOString().slice(0,10);
+      const v = byDay[key] || 0;
+      row.push({ date:key, v });
+    }
+    cells.push(row);
+  }
+  const vals = cells.flat().map(c=>c.v).filter(v=>v>0);
+  const max = Math.max(...vals, 1);
+  const dowLabels = ['S','M','T','W','T','F','S'];
+  // Horizontal layout: rows=days-of-week, columns=weeks.
+  let html = `<div class="heatmap" style="--weeks:${WEEKS}">`;
+  // Header row: blank corner + week labels (month-day of Sunday).
+  html += '<div></div>';
+  cells.forEach(row=>{ html += `<div class="wk">${row[0].date.slice(5)}</div>`; });
+  // Day rows.
+  for (let d=0; d<7; d++){
+    html += `<div class="dow">${dowLabels[d]}</div>`;
+    cells.forEach(row=>{
+      const c = row[d];
+      const intensity = c.v>0 ? clamp(c.v/max*100,8,100) : 0;
+      const style = intensity>0
+        ? `background: var(--heat); background-size: 100px 14px; background-position: ${intensity}px 0; filter: saturate(${0.5+intensity/150})`
+        : '';
+      html += `<div class="cell" style="${style}" title="${c.date}: ${fmtUSD(c.v)}"></div>`;
+    });
+  }
+  html += '</div>';
+  html += `<div class="mute" style="font-size:10px;margin-top:8px">max day: ${fmtUSD(max)} · last ${WEEKS} weeks · hover for detail</div>`;
+  $('heatmap').innerHTML = html;
+}
+
+function renderQuadrant(sessions){
+  if(charts.quadrant) charts.quadrant.destroy();
+  const cs = getComputedStyle(document.documentElement);
+  const pts = sessions.filter(s=>s.Turns>0).map(s=>{
+    const cpt = s['Cost (USD)']/s.Turns;
+    const risk = (s.Turns>1000 || cpt>0.80) ? 'red' : (s.Turns>500 || cpt>0.40) ? 'yellow' : 'green';
+    return { x: s.Turns, y: cpt, r: Math.min(30, 3 + Math.sqrt(s['Cost (USD)'])*1.5), risk, label: shortSess(s['Session ID']) };
+  });
+  const groups = { green:[], yellow:[], red:[] };
+  pts.forEach(p=>groups[p.risk].push(p));
+  const color = r => cs.getPropertyValue(r==='red'?'--red':r==='yellow'?'--yellow':'--green').trim();
+  const datasets = Object.entries(groups).filter(([,v])=>v.length).map(([k,v])=>({
+    label: k, data: v, backgroundColor: color(k)+'99', borderColor: color(k), borderWidth:1,
+  }));
+  charts.quadrant = new Chart($('quadrant'), {
+    type:'bubble',
+    data:{ datasets },
+    options:{
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`${c.raw.label} · turns ${c.raw.x} · $/turn ${c.raw.y.toFixed(2)}`}}},
+      scales:{
+        x:{type:'logarithmic', title:{display:true,text:'turns (log)', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim()}},
+        y:{title:{display:true,text:'$/turn', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim(), callback:v=>'$'+v.toFixed(2)}},
+      },
+    },
+  });
+}
+
+function renderPareto(sessions){
+  if(charts.pareto) charts.pareto.destroy();
+  const cs = getComputedStyle(document.documentElement);
+  const sorted = sessions.slice().sort((a,b)=>b['Cost (USD)']-a['Cost (USD)']);
+  const total = sorted.reduce((a,s)=>a+s['Cost (USD)'],0) || 1;
+  let acc=0;
+  const data = sorted.map((s,i)=>{ acc += s['Cost (USD)']; return { x:i+1, y:acc/total*100, cost:s['Cost (USD)'] }; });
+  let n80=0; for(let i=0;i<data.length;i++){ if(data[i].y>=80){ n80=i+1; break; } }
+  if(!n80 && data.length) n80 = data.length;
+  $('paretoNote').innerHTML = `<span class="yellow">${n80}</span> of ${sessions.length} sessions = <span class="yellow">80%</span> of spend · concentration <span class="yellow">${sessions.length?(n80/sessions.length*100).toFixed(0):0}%</span>`;
+  charts.pareto = new Chart($('pareto'), {
+    type:'line',
+    data:{ datasets:[
+      { data: data.map(d=>({x:d.x,y:d.y})), borderColor: cs.getPropertyValue('--yellow').trim(), backgroundColor:cs.getPropertyValue('--yellow').trim()+'33', fill:true, tension:.2, pointRadius:0, borderWidth:2 },
+    ]},
+    options:{
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`session #${c.parsed.x} · ${c.parsed.y.toFixed(1)}% cumulative`}}},
+      scales:{
+        x:{type:'linear', title:{display:true,text:'session rank', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim()}},
+        y:{min:0,max:100, title:{display:true,text:'% cumulative', color:cs.getPropertyValue('--mute').trim()}, grid:{color:cs.getPropertyValue('--rule').trim()}, ticks:{color:cs.getPropertyValue('--mute').trim(), callback:v=>v+'%'}},
+      },
+    },
+  });
+}
+
+function renderActivityMix(sessions){
+  // Approximate "activity" from local data: categorize by session size
+  const bkt = { 'single-shot (1-5 turns)':0, 'short (6-30)':0, 'medium (31-100)':0, 'long (101-500)':0, 'marathon (500+)':0 };
+  sessions.forEach(s=>{
+    const t=s.Turns, c=s['Cost (USD)'];
+    if(t<=5) bkt['single-shot (1-5 turns)']+=c;
+    else if(t<=30) bkt['short (6-30)']+=c;
+    else if(t<=100) bkt['medium (31-100)']+=c;
+    else if(t<=500) bkt['long (101-500)']+=c;
+    else bkt['marathon (500+)']+=c;
+  });
+  const rows = Object.entries(bkt);
+  const total = rows.reduce((a,[,v])=>a+v,0) || 1;
+  const max = Math.max(...rows.map(([,v])=>v),1);
+  const head = '<thead><tr><th>bucket</th><th></th><th class="num">cost</th><th class="num">%</th></tr></thead>';
+  const body = rows.map(([k,v])=>`<tr><td>${k}</td><td>${bar(v/max*100)}</td><td class="num yellow">${fmtUSD(v)}</td><td class="num mute">${(v/total*100).toFixed(0)}%</td></tr>`).join('');
+  $('activity').innerHTML = head+'<tbody>'+body+'</tbody>';
+}
+
+function renderTools(){
+  const rows = DATA.tools.slice(0,10);
+  if(!rows.length){ $('tools').innerHTML='<tr><td class="empty">no data</td></tr>'; return; }
+  const max = Math.max(...rows.map(t=>t.Calls),1);
+  const head='<thead><tr><th>tool</th><th></th><th class="num">calls</th><th class="num">%</th></tr></thead>';
+  const body=rows.map(t=>`<tr><td class="cyan">${t.Tool}</td><td>${bar(t.Calls/max*100)}</td><td class="num yellow">${fmtInt(t.Calls)}</td><td class="num mute">${t['Share (%)'].toFixed(1)}%</td></tr>`).join('');
+  $('tools').innerHTML=head+'<tbody>'+body+'</tbody>';
+}
+function renderShell(){
+  const rows = DATA.shellCommands.slice(0,10);
+  if(!rows.length){ $('shell').innerHTML='<tr><td class="empty">no data</td></tr>'; return; }
+  const max = Math.max(...rows.map(t=>t.Calls),1);
+  const head='<thead><tr><th>cmd</th><th></th><th class="num">calls</th><th class="num">%</th></tr></thead>';
+  const body=rows.map(t=>`<tr><td><code class="kv">${t.Command}</code></td><td>${bar(t.Calls/max*100)}</td><td class="num yellow">${fmtInt(t.Calls)}</td><td class="num mute">${t['Share (%)'].toFixed(1)}%</td></tr>`).join('');
+  $('shell').innerHTML=head+'<tbody>'+body+'</tbody>';
+}
+
+// ================== governor modal ==================
+function openGov(){ GOV_PENDING = {...GOV}; renderControls(); $('govBackdrop').classList.add('open'); }
+function closeGov(){ $('govBackdrop').classList.remove('open'); }
+function saveAndRebuild(){ GOV = {...GOV_PENDING}; saveGov(); closeGov(); render(); }
+
+function renderControls(){
+  const g = GOV_PENDING;
+  $('controls').innerHTML = `
+    <div class="crow"><div><div class="nm">Mute all advisories</div><div class="ds">Metering continues; stderr lines suppressed.</div></div><div class="switch ${g.muted?'on':''}" data-t="muted"></div></div>
+    <div class="crow"><div><div class="nm">Yellow advisories</div><div class="ds">Fires when rolling cache-read median crosses warn threshold.</div></div><div class="switch ${g.yellowAdvisories?'on':''}" data-t="yellowAdvisories"></div></div>
+    <div class="crow"><div><div class="nm">Red advisories</div><div class="ds">Stronger warning at block threshold. Recommends /cost-fork.</div></div><div class="switch ${g.redAdvisories?'on':''}" data-t="redAdvisories"></div></div>
+    <div class="crow"><div><div class="nm">Phase-boundary detection</div><div class="ds">Matches "write white paper", "build installer", etc.</div></div><div class="switch ${g.phaseBoundary?'on':''}" data-t="phaseBoundary"></div></div>
+    <div class="crow"><div><div class="nm">Retry-loop detection</div><div class="ds">≥3 retry prompts/hour → scoped-session suggestion.</div></div><div class="switch ${g.retryLoop?'on':''}" data-t="retryLoop"></div></div>
+    <div class="crow"><div><div class="nm">Warn threshold</div><div class="ds">Yellow fires at this cache-read median.</div></div><div class="slider"><input type="range" min="50000" max="500000" step="25000" value="${g.warnTokens}" data-s="warnTokens"><span class="val">${fmtInt(g.warnTokens)} tok</span></div></div>
+    <div class="crow"><div><div class="nm">Block threshold</div><div class="ds">Red fires here. Typically 2× warn.</div></div><div class="slider"><input type="range" min="100000" max="800000" step="25000" value="${g.blockTokens}" data-s="blockTokens"><span class="val">${fmtInt(g.blockTokens)} tok</span></div></div>
+    <div class="crow"><div><div class="nm">Max session turns</div><div class="ds">Suggest fork past this many turns. Lower = more aggressive.</div></div><div class="slider"><input type="range" min="100" max="2000" step="50" value="${g.maxTurns}" data-s="maxTurns"><span class="val">${g.maxTurns} turns</span></div></div>
+    <div class="crow"><div><div class="nm">Daily USD cap</div><div class="ds">Soft cap for the daily-spend advisory.</div></div><div class="slider"><input type="range" min="10" max="500" step="10" value="${g.dailyUSD}" data-s="dailyUSD"><span class="val">$${g.dailyUSD}</span></div></div>
+  `;
+  document.querySelectorAll('#controls [data-t]').forEach(s=>{
+    s.addEventListener('click', ()=>{ GOV_PENDING[s.dataset.t]=!GOV_PENDING[s.dataset.t]; renderControls(); updateLivePreview(); });
+  });
+  document.querySelectorAll('#controls [data-s]').forEach(s=>{
+    s.addEventListener('input', ()=>{ GOV_PENDING[s.dataset.s]=parseInt(s.value,10); renderControls(); updateLivePreview(); });
+  });
+  updateLivePreview();
+}
+function updateLivePreview(){
+  const a = adminKeyInfo.hasKey ? derive(currentPeriod) : null;
+  const view = a ? { cost:a.totalCost, daily:a.daily, models:a.models, tokensIn:a.totalIn, tokensOut:a.totalOut, cacheR:a.totalCacheR, cacheW:a.totalCacheW } : localFallbackView(currentPeriod);
+  if (!view || !view.cost){ $('liveSavingsBig').textContent='—'; $('liveSavingsMeta').textContent='no data in current period'; return; }
+  const sav = computeSavings(view, GOV_PENDING);
+  $('liveSavingsBig').textContent = `save ~${fmtUSD(sav.saved)} (${(sav.aggression*100).toFixed(0)}% of c-read)`;
+  $('liveSavingsMeta').textContent = `remaining ${fmtUSD(sav.remaining)} of ${fmtUSD(view.cost)} · c-read share ${(sav.pctCacheRead*100).toFixed(0)}%`;
+}
+
+// ================== admin key ==================
+async function refreshAdminKeyCard(){
+  try { adminKeyInfo = await fetch('/api/admin-key/info').then(r=>r.json()); } catch { adminKeyInfo={hasKey:false}; }
+  renderAdminKey();
+}
+function renderAdminKey(){
+  const el = $('adminKey');
+  const dot = adminKeyInfo.hasKey ? '<span class="dot ok"></span>' : '<span class="dot off"></span>';
+  const id  = adminKeyInfo.hasKey ? adminKeyInfo.prefix+adminKeyInfo.suffix : 'not set';
+  const src = adminKeyInfo.source || 'none';
+  el.innerHTML = `
+    <div class="keyrow">
+      ${dot}<code class="kv">${id}</code>
+      <span class="mute">source: ${src}</span>
+      <span class="spacer"></span>
+      <input id="adminKeyInput" class="key" type="password" placeholder="sk-ant-admin01-..." autocomplete="off" spellcheck="false"/>
+      <button class="btn primary" id="saveKeyBtn">save</button>
+      <button class="btn" id="testKeyBtn">test</button>
+      <span id="adminKeyStatus" class="mute" style="font-size:11px"></span>
+    </div>`;
+  $('saveKeyBtn').addEventListener('click', async ()=>{
+    const key = $('adminKeyInput').value.trim();
+    const st = $('adminKeyStatus');
+    if(!key){ st.className='red'; st.textContent='paste the key first'; return; }
+    st.className='cyan'; st.innerHTML='<span class="spinner"></span>saving + testing...';
+    try {
+      const r = await fetch('/api/admin-key', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})}).then(r=>r.json());
+      if(r.error){ st.className='red'; st.textContent='failed: '+r.error; return; }
+      $('adminKeyInput').value='';
+      if(r.test && r.test.ok){
+        st.className='green'; st.textContent='saved + verified '+r.prefix+r.suffix;
+        await refreshAdminKeyCard();
+        setStatus('loading','fetching with new key...');
+        try { await prefetchAll(); setStatus('ok','anthropic cached'); render(); } catch(e){ setStatus('hot','fetch failed: '+e.message); }
+      } else { st.className='yellow'; st.textContent='saved but test failed: '+(r.test?.reason||'?'); }
+    } catch(e){ st.className='red'; st.textContent='error: '+e.message; }
+  });
+  $('testKeyBtn').addEventListener('click', async ()=>{
+    const st=$('adminKeyStatus'); st.className='cyan'; st.innerHTML='<span class="spinner"></span>testing...';
+    try { const r = await fetch('/api/admin-key/test',{method:'POST'}).then(r=>r.json());
+      if(r.ok){ st.className='green'; st.textContent='OK '+r.prefix+r.suffix; } else { st.className='red'; st.textContent='fail: '+(r.reason||'no key'); }
+    } catch(e){ st.className='red'; st.textContent='err: '+e.message; }
+  });
+}
+
+// ================== events ==================
+document.getElementById('tabs').addEventListener('click', e=>{ const t=e.target.closest('.tab'); if(!t) return; currentPeriod=t.dataset.p; $('monthSel').value=''; render(); });
+document.getElementById('monthSel').addEventListener('change', e=>{ const v=e.target.value; if(!v) return; currentPeriod='Month:'+v; render(); });
+document.getElementById('themeSeg').addEventListener('click', e=>{ const o=e.target.closest('.opt'); if(!o) return; setTheme(o.dataset.theme); });
+document.getElementById('refreshBtn').addEventListener('click', async ()=>{
+  setStatus('loading','clearing cache + refetching...');
+  try { await fetch('/api/refresh',{method:'POST'}); ANTHROPIC_CACHE={}; ANTHROPIC_RAW=null;
+    if (adminKeyInfo.hasKey){ await prefetchAll(); setStatus('ok','refreshed'); } else setStatus('hot','no admin key');
+    render();
+  } catch(e){ setStatus('hot','refresh failed: '+e.message); }
+});
+document.getElementById('govResetBtn').addEventListener('click', ()=>{
+  GOV = {...DEFAULT_GOV}; saveGov(); render();
+});
+document.addEventListener('keydown', e=>{
+  if (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
+  if (e.key==='r') $('refreshBtn').click();
+  if (e.key==='t') setTheme(document.documentElement.getAttribute('data-theme')==='dark'?'anthropic':'dark');
+  if (e.key==='1') { currentPeriod='Today'; render(); }
+  if (e.key==='2') { currentPeriod='7 Days'; render(); }
+  if (e.key==='3') { currentPeriod='30 Days'; render(); }
+  if (e.key==='4') { currentPeriod='This Month'; render(); }
+  if (e.key==='5') { currentPeriod='All Time'; render(); }
+});
+
+// ================== boot ==================
+setTheme((()=>{ try{ return localStorage.getItem('codeburn.theme')||'dark'; }catch{ return 'dark'; } })());
+bootstrap();
+</script>
+</body>
+</html>

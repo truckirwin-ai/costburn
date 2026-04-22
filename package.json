@@ -1,0 +1,30 @@
+{
+  "name": "costburn",
+  "version": "0.1.0",
+  "description": "Local-first Claude Code cost dashboard and governor. Live Anthropic spend + six-lever what-if savings model.",
+  "main": "serve.js",
+  "scripts": {
+    "start": "node serve.js"
+  },
+  "bin": {
+    "costburn": "serve.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "cost",
+    "dashboard",
+    "llm",
+    "observability"
+  ],
+  "author": "Truck Irwin <truckirwin@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/truckirwin-ai/costburn.git"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
